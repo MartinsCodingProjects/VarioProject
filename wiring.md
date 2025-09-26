@@ -1,0 +1,7 @@
+VCC → 3V3
+GND → GND
+SCL → GPIO 18 (SCK)
+SDA → GPIO 23 (MOSI)
+CSB → GPIO 5 (CS)
+SDO → GPIO 19 (MISO)
+PS → GND (for SPI mode)
