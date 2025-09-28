@@ -1,5 +1,3 @@
-
-
 def display_v_speed(v_speed):
     """
     Display the current vertical speed
