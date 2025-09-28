@@ -12,3 +12,15 @@ class VarioState:
         self.boot_button = None  # GPIO Pin object for BOOT button, initialized in main.py
         self.onboard_led = None  # GPIO Pin object for onboard LED, initialized in main.py
         self.sound_enabled = False  # Sound state, toggled by BOOT button
+        self.debug_server = "192.168.178.119"  # Placeholder for debug server, if implemented
+
+    def log(self, message):
+        """
+        Log a message to the terminal and send it to a remote API.
+        """
+        print(message)  # Print to the terminal
+        try:
+            from modules.util import send_to_api  # Import the send_to_api function
+            send_to_api(f"http://{self.debug_server}:5000/log", {"message": message})  # Send to API
+        except Exception as e:
+            print(f"Failed to send log to API: {e}")

@@ -1,3 +1,5 @@
+import urequests
+
 def convert_to_altitude(pressure, base_pressure):
     """
     Convert pressure in mbar to altitude in meters using the barometric formula.
@@ -43,12 +45,27 @@ def setup_sound_toggle(vario_state):
         if time.ticks_diff(current_time, last_interrupt_time[0]) > 300:
             vario_state.sound_enabled = not vario_state.sound_enabled
             onboard_led.value(vario_state.sound_enabled)
-            print(f"Sound {'enabled' if vario_state.sound_enabled else 'disabled'}")
+            vario_state.log(f"Sound {'enabled' if vario_state.sound_enabled else 'disabled'}")
             last_interrupt_time[0] = current_time
     
     # Attach interrupt to BOOT button (triggers on button press - falling edge)
     boot_button.irq(trigger=Pin.IRQ_FALLING, handler=toggle_sound_interrupt)
-    
-    print("Sound toggle setup complete - Press BOOT button to toggle sound on/off")
-    
+
+    vario_state.log("Sound toggle setup complete - Press BOOT button to toggle sound on/off")
+
     return boot_button, onboard_led
+
+def send_to_api(endpoint, data):
+    """
+    Send data to a remote API endpoint.
+    Args:
+        endpoint (str): The API endpoint URL.
+        data (dict): The data to send as JSON.
+    """
+    try:
+        response = urequests.post(endpoint, json=data)
+        print("Data sent:", data)
+        print("Response:", response.text)
+        response.close()
+    except Exception as e:
+        print("Failed to send data:", e)

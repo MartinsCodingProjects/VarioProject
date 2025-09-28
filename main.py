@@ -29,12 +29,12 @@ vario_state = VarioState(BASE_PRESSURE, MEASUREMENT_FREQUENCY, INTEGRATION_INTER
 
 # Initialize hardware with calibration
 ## Baro sensor
-spi, cs, calibration = init_ms5611() # init and calibration of baro sensor
+spi, cs, calibration = init_ms5611(vario_state) # init and calibration of baro sensor
 c1, c2, c3, c4, c5, c6 = calibration
-print("MS5611 sensor initialized with calibration")
+vario_state.log("MS5611 sensor initialized with calibration")
 ## Buzzer
-vario_state.buzzer_pwm = init_buzzer(BUZZER_PIN)
-print("Buzzer initialized and Audio ready!")
+vario_state.buzzer_pwm = init_buzzer(BUZZER_PIN,vario_state)
+vario_state.log("Buzzer initialized and Audio ready!")
 # Setup sound toggle functionality
 boot_button, onboard_led = setup_sound_toggle(vario_state)
 
@@ -58,7 +58,7 @@ def run_vario():
     vario_state.last_measurement_time = time.ticks_ms()
     
     
-    print(f"Starting vario at {MEASUREMENT_FREQUENCY} Hz (interval: {INTERVAL_MS} ms)")
+    vario_state.log(f"Starting vario at {MEASUREMENT_FREQUENCY} Hz (interval: {INTERVAL_MS} ms)")
     
     # Main loop Thread for measurements
     while True:
@@ -84,9 +84,9 @@ def run_vario():
                 vario_state.integrated_v_speed = round((altitude - vario_state.altitude_log[0]) / INTEGRATION_INTERVAL, 2)
 
                 if vario_state.v_speed != vario_state.last_v_speed:
-                    display_v_speed(vario_state.v_speed)
+                    display_v_speed(vario_state.v_speed, vario_state)
                 # if vario_state.integrated_v_speed != vario_state.last_integrated_v_speed:
-                   # display_integrated_v_speed(vario_state.integrated_v_speed)
+                   # display_integrated_v_speed(vario_state.integrated_v_speed, vario_state)
 
                 vario_state.last_integrated_v_speed = vario_state.integrated_v_speed
                 vario_state.last_v_speed = vario_state.v_speed
@@ -101,7 +101,7 @@ def run_vario():
                     vario_state.measurement_count = 0  # Reset count after GC
 
             except Exception as e:
-                print(f"Measurement error: {e}")
+                vario_state.log(f"Measurement error: {e}")
                 # Continue timing even if measurement fails
                 vario_state.last_measurement_time += INTERVAL_MS
 

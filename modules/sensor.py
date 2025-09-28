@@ -73,13 +73,13 @@ def ms5611_pressure_measurement(spi, cs, c1, c2, c3, c4, c5, c6):
     
     return pressure / 100.0  # Convert to mbar
 
-def init_ms5611():
+def init_ms5611(vario_state):
     """Initialize MS5611 and read calibration data"""
     spi, cs = init_spi()
     ms5611_reset(spi, cs)
     
     # Read sensor calibration data (factory programmed values)
-    print("Reading calibration data...")
+    vario_state.log("Reading calibration data...")
     c1 = ms5611_read_prom(spi, cs, 0xA2)  # Pressure sensitivity
     c2 = ms5611_read_prom(spi, cs, 0xA4)  # Pressure offset
     c3 = ms5611_read_prom(spi, cs, 0xA6)  # Temperature coefficient of pressure sensitivity
@@ -87,6 +87,6 @@ def init_ms5611():
     c5 = ms5611_read_prom(spi, cs, 0xAA)  # Reference temperature
     c6 = ms5611_read_prom(spi, cs, 0xAC)  # Temperature coefficient of temperature
     
-    print(f"Calibration: C1={c1}, C2={c2}, C3={c3}, C4={c4}, C5={c5}, C6={c6}")
+    vario_state.log(f"Calibration: C1={c1}, C2={c2}, C3={c3}, C4={c4}, C5={c5}, C6={c6}")
     
     return spi, cs, (c1, c2, c3, c4, c5, c6)

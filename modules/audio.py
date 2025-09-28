@@ -1,7 +1,7 @@
 from time import sleep
 from machine import Pin, PWM
 
-def init_buzzer(buzzer_pin = 4):
+def init_buzzer(buzzer_pin = 4, vario_state=None):
     """
     Initialize the passive buzzer on GPIO 4
     Must be called before using any audio functions
@@ -13,13 +13,13 @@ def init_buzzer(buzzer_pin = 4):
         pwm = PWM(pin)
         pwm.freq(1000)  # Default frequency
         pwm.duty(0) # Start with the buzzer off
-        print(f"Buzzer initialized on GPIO {buzzer_pin}")
+        vario_state.log(f"Buzzer initialized on GPIO {buzzer_pin}")
         return pwm
     except Exception as e:
-        print(f"Buzzer initialization failed: {e}")
+        vario_state.log(f"Buzzer initialization failed: {e}")
         return None
 
-def play_tone(frequency, duration, buzzer_pwm):
+def play_tone(frequency, duration, buzzer_pwm, vario_state):
     """
     Play a tone at given frequency for given duration (in milliseconds)
     frequency: Hz (0 = silence)
@@ -27,7 +27,7 @@ def play_tone(frequency, duration, buzzer_pwm):
     """
     
     if buzzer_pwm is None:
-        print("Buzzer not initialized! Call init_buzzer() first.")
+        vario_state.log("Buzzer not initialized! Call init_buzzer() first.")
         return
     
     if frequency > 0 and duration > 0:
@@ -36,7 +36,7 @@ def play_tone(frequency, duration, buzzer_pwm):
         buzzer_pwm.duty(512)  # 50% duty cycle (0-1023 range)
         sleep(duration / 1000.0)  # Convert ms to seconds
         buzzer_pwm.duty(0)  # Stop tone
-        print(f"Beeped: {frequency} Hz for {duration} ms")
+        vario_state.log(f"Beeped: {frequency} Hz for {duration} ms")
     else:
         # Silence - ensure buzzer is off
         buzzer_pwm.duty(0)
@@ -59,7 +59,7 @@ def handle_beep(v_speed_lock, vario_state, positiv_threshold = 0.2, negativ_thre
     """
     last_v_speed = 0  # Cache the last known v_speed for fallback
     
-    print("Beep handler thread started")
+    vario_state.log("Beep handler thread started")
 
     while True:
         # Try to acquire the lock without blocking
@@ -83,7 +83,7 @@ def handle_beep(v_speed_lock, vario_state, positiv_threshold = 0.2, negativ_thre
 
             # Play the tone if within active thresholds
             if v_speed > positiv_threshold or v_speed < negativ_threshold:
-                play_tone(tone, duration, vario_state.buzzer_pwm)
+                play_tone(tone, duration, vario_state.buzzer_pwm, vario_state)
                 if pause > 0:
                     sleep(pause / 1000.0)  # Convert ms to seconds
         else:
