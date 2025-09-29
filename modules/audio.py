@@ -62,6 +62,10 @@ def handle_beep(v_speed_lock, vario_state, positiv_threshold = 0.2, negativ_thre
     vario_state.log("Beep handler thread started")
 
     while True:
+        # Check if the vario is turned on
+        if not vario_state.turned_on:
+            sleep(0.1)  # Sleep briefly to avoid busy waiting
+            continue
         # Try to acquire the lock without blocking
         if v_speed_lock.acquire():
             try:
