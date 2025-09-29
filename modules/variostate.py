@@ -1,5 +1,6 @@
 class VarioState:
     def __init__(self, base_pressure, measurement_frequency, integration_interval):
+        self.turned_on = False  # Vario state
         self.v_speed = 0.00  # Vertical speed (m/s)
         self.last_v_speed = 0.00
         self.integrated_v_speed = 0.00

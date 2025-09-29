@@ -62,6 +62,12 @@ def run_vario():
     
     # Main loop Thread for measurements
     while True:
+        if vario_state.turned_on:
+            mainloop_function()
+        # Small sleep to prevent CPU overload while maintaining timing accuracy
+        time.sleep_ms(1)
+
+def mainloop_function():
         current_time = time.ticks_ms()
 
         # Check if it's time for next measurement
@@ -104,9 +110,6 @@ def run_vario():
                 vario_state.log(f"Measurement error: {e}")
                 # Continue timing even if measurement fails
                 vario_state.last_measurement_time += INTERVAL_MS
-
-        # Small sleep to prevent CPU overload while maintaining timing accuracy
-        time.sleep_ms(1)
 
 # Start the vario
 if __name__ == "__main__":
