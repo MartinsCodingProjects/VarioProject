@@ -16,11 +16,11 @@ class VarioState:
 
     def log(self, message):
         """
-        Log a message to the terminal and send it to a remote API.
+        Log a message to the terminal and send it via WebSocket.
         """
         print(message)  # Print to the terminal
         try:
-            from modules.util import send_to_api  # Import the send_to_api function
-            send_to_api(f"http://{self.debug_server}:5000/log", {"message": message})  # Send to API
+            from modules.util import send_to_websocket  # Import the send_to_websocket function
+            send_to_websocket(f"ws://{self.debug_server}:5000/ws", message)  # Send via WebSocket
         except Exception as e:
-            print(f"Failed to send log to API: {e}")
+            print(f"Failed to send log via WebSocket: {e}")

@@ -55,17 +55,42 @@ def setup_sound_toggle(vario_state):
 
     return boot_button, onboard_led
 
-def send_to_api(endpoint, data):
+def send_to_websocket(endpoint, message):
     """
-    Send data to a remote API endpoint.
+    Send a message via the existing WebSocket connection.
     Args:
-        endpoint (str): The API endpoint URL.
-        data (dict): The data to send as JSON.
+        endpoint (str): Not used, kept for compatibility
+        message (str): The message to send.
     """
     try:
-        response = urequests.post(endpoint, json=data)
-        print("Data sent:", data)
-        print("Response:", response.text)
-        response.close()
+        import boot  # Import boot to access ws_connection
+        import urandom as random
+        
+        if boot.ws_connection is None:
+            return  # No connection available, skip silently
+        
+        # Send the message (simple text frame)
+        message_bytes = message.encode('utf-8')
+        frame = bytearray([0x81])  # Text frame, final fragment
+        
+        if len(message_bytes) < 126:
+            frame.append(0x80 | len(message_bytes))  # Mask bit + length
+        else:
+            frame.append(0x80 | 126)  # Mask bit + extended length indicator
+            frame.extend(len(message_bytes).to_bytes(2, 'big'))
+        
+        # Add masking key (4 bytes)
+        mask = bytes([random.getrandbits(8) for _ in range(4)])
+        frame.extend(mask)
+        
+        # Mask the payload
+        masked_payload = bytearray()
+        for i, byte in enumerate(message_bytes):
+            masked_payload.append(byte ^ mask[i % 4])
+        
+        frame.extend(masked_payload)
+        boot.ws_connection.send(frame)
+        
     except Exception as e:
-        print("Failed to send data:", e)
+        # Silently fail to avoid disrupting the main program
+        pass
