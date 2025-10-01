@@ -16,10 +16,10 @@ def convert_to_altitude(pressure, base_pressure):
 def setup_toggle_button(vario_state):
     """
     Setup external interrupt for BOOT button to toggle the main loop on/off.
-    Also initializes onboard LED to show the current state.
+    Also toggles sound_enabled and onboard LED state.
 
     Args:
-        vario_state: VarioState object containing turned_on flag
+        vario_state: VarioState object containing turned_on and sound_enabled flags
 
     Returns:
         tuple: (boot_button, onboard_led) for reference if needed
@@ -36,21 +36,32 @@ def setup_toggle_button(vario_state):
 
     def toggle_main_loop_interrupt(pin):
         """
-        Interrupt callback to toggle vario_state.turned_on and update LED.
+        Interrupt callback to toggle vario_state.turned_on, vario_state.sound_enabled, and onboard LED.
         """
         current_time = time.ticks_ms()
 
         # Debounce: Ignore interrupts that occur within 300ms of the last one
         if time.ticks_diff(current_time, last_interrupt_time[0]) > 300:
+            # Toggle main loop state
             vario_state.turned_on = not vario_state.turned_on
-            onboard_led.value(vario_state.turned_on)
+
+            # Toggle sound state
+            vario_state.sound_enabled = not vario_state.sound_enabled
+
+            # Toggle onboard LED state
+            onboard_led.value(not onboard_led.value())
+
+            # Log the changes
             vario_state.log(f"Vario {'started' if vario_state.turned_on else 'stopped'}")
+            vario_state.log(f"Sound {'enabled' if vario_state.sound_enabled else 'disabled'}")
+
+            # Update last interrupt time
             last_interrupt_time[0] = current_time
 
     # Attach interrupt to BOOT button (triggers on button press - falling edge)
     boot_button.irq(trigger=Pin.IRQ_FALLING, handler=toggle_main_loop_interrupt)
 
-    vario_state.log("Toggle button setup complete - Press BOOT button to start/stop the vario")
+    vario_state.log("Toggle button setup complete - Press BOOT button to start/stop the vario and toggle sound")
 
     return boot_button, onboard_led
 

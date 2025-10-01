@@ -2,7 +2,8 @@ import os
 import subprocess
 
 # Define the files and directories to exclude
-EXCLUDE = {".git", "__pycache__", ".gitignore", "older_versions"}
+EXCLUDE = {".git", "__pycache__", ".gitignore", "older_versions", "upload_to_esp32.py", "debug_api.py", "todo.md"}
+EXCLUDE_EXTENSIONS = {".md"}
 
 # Define the target directory on the ESP32
 ESP32_TARGET_DIR = ":"
@@ -12,9 +13,16 @@ ESP32_PORT = "COM4"
 
 def should_exclude(path):
     """Check if a file or directory should be excluded."""
+    # Check for excluded directories or files
     for pattern in EXCLUDE:
         if pattern in path:
             return True
+
+    # Check for excluded file extensions
+    _, ext = os.path.splitext(path)
+    if ext in EXCLUDE_EXTENSIONS:
+        return True
+
     return False
 
 def upload_files():
@@ -33,13 +41,12 @@ def upload_files():
 
             # Upload the file using mpremote
             print(f"Uploading {src_path} to {dst_path}")
-            subprocess.run([
-                "mpremote", "connect", ESP32_PORT, "fs", "cp", src_path, dst_path
-            ], check=True)
+            try:
+                subprocess.run([
+                    "mpremote", "connect", ESP32_PORT, "fs", "cp", src_path, dst_path
+                ], check=True)
+            except subprocess.CalledProcessError as e:
+                print(f"Failed to upload {src_path}: {e}")
 
 if __name__ == "__main__":
-    try:
-        upload_files()
-        print("Upload complete!")
-    except subprocess.CalledProcessError as e:
-        print(f"Error during upload: {e}")
+    upload_files()
