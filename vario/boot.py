@@ -1,157 +1,171 @@
-import network
+# boot.py - ESP32 Vario System Boot Sequence
+# Handles system initialization, networking, and hardware setup
+
 import time
-import usocket as socket
-import uhashlib as hashlib
-import ubinascii as binascii
-import urandom as random
+import gc
+import modules.global_state as global_state
 
-# Global variables
-wifi_connected = False
-ws_connection = None
+# Import configuration and managers
+from modules.boot_config import (
+    ENABLE_REMOTE_DEBUG, 
+    WIFI_SSID, 
+    WIFI_PASSWORD,
+    WEBSOCKET_HOST, 
+    WEBSOCKET_PORT,
+    BOOT_MESSAGES,
+    STATUS_MESSAGES
+)
+from modules.network_manager import NetworkManager
+from modules.hardware_manager import HardwareManager
+from modules.variostate import VarioState
 
-def connect_to_wifi(ssid, password):
-    """
-    Connect to Wi-Fi synchronously.
-    """
-    global wifi_connected
-    wlan = network.WLAN(network.STA_IF)
-    wlan.active(True)
-    wlan.connect(ssid, password)
+# Import system configuration
+from config import (
+    BASE_PRESSURE,
+    MEASUREMENT_FREQUENCY,
+    INTEGRATION_INTERVAL,
+    BUZZER_PIN
+)
 
-    print("Connecting to Wi-Fi...")
-    while not wlan.isconnected():
-        time.sleep(0.1)
 
-    wifi_connected = True
-    print("Connected to Wi-Fi!")
-    print("IP Address:", wlan.ifconfig()[0])
-
-def setup_websocket_connection(host, port=5474):
-    """
-    Setup WebSocket connection to debug server.
-    """
-    global ws_connection
+def initialize_vario_state():
+    """Initialize the core VarioState object with system parameters"""
+    print("Initializing VarioState...")
     
-    try:
-        print(f"Connecting to WebSocket server at {host}:{port}")
-        
-        # First test basic TCP connectivity
-        print("Testing basic TCP connection...")
-        s = socket.socket()
-        s.settimeout(10)  # 10 second timeout
-        
-        print(f"Attempting to connect to {host}:{port}...")
-        s.connect((host, port))
-        print("✅ TCP connection successful!")
-        
-        # Generate WebSocket key
-        key_bytes = bytes([random.getrandbits(8) for _ in range(16)])
-        key = binascii.b2a_base64(key_bytes)[:-1]  # Remove trailing newline
-        
-        print("Sending WebSocket handshake...")
-        
-        # Send WebSocket handshake
-        handshake = (
-            f"GET / HTTP/1.1\r\n"
-            f"Host: {host}:{port}\r\n"
-            "Upgrade: websocket\r\n"
-            "Connection: Upgrade\r\n"
-            f"Sec-WebSocket-Key: {key.decode()}\r\n"
-            "Sec-WebSocket-Version: 13\r\n"
-            "\r\n"
-        )
-        s.send(handshake.encode())
-        print("Handshake sent, waiting for response...")
-        
-        # Read handshake response with timeout
-        s.settimeout(5)
-        response = s.recv(1024)
-        response_str = response.decode()
-        
-        print("Server response:")
-        print(response_str[:200] + "..." if len(response_str) > 200 else response_str)
-        
-        if b"101 Switching Protocols" in response:
-            ws_connection = s
-            print("✅ WebSocket handshake successful!")
-            
-            # Send initial message
-            send_websocket_message("ESP32 connected and ready!")
-            
-            return True
-        else:
-            print("❌ WebSocket handshake failed!")
-            s.close()
-            return False
-            
-    except Exception as e:
-        print(f"❌ WebSocket connection failed: {e}")
-        print(f"Error type: {type(e)}")
-        try:
-            s.close()
-        except:
-            pass
-        return False
+    # Create VarioState with configured parameters
+    vario_state = VarioState(
+        base_pressure=BASE_PRESSURE,
+        measurement_frequency=MEASUREMENT_FREQUENCY,
+        integration_interval=INTEGRATION_INTERVAL
+    )
+    
+    print("VarioState initialized successfully")
+    return vario_state
 
-def send_websocket_message(message):
-    """
-    Send message through WebSocket connection
-    """
-    global ws_connection
-    
-    if not ws_connection:
-        print("No WebSocket connection available")
-        return False
-    
-    try:
-        # Create WebSocket frame (simple text frame)
-        message_bytes = message.encode('utf-8')
-        frame = bytearray()
-        frame.append(0x81)  # Text frame, final fragment
-        
-        # Add payload length
-        payload_length = len(message_bytes)
-        if payload_length < 126:
-            frame.append(0x80 | payload_length)  # Masked bit + length
-        else:
-            print("Message too long for simple implementation")
-            return False
-        
-        # Add masking key (4 bytes)
-        mask = bytes([random.getrandbits(8) for _ in range(4)])
-        frame.extend(mask)
-        
-        # Add masked payload
-        masked_payload = bytes(message_bytes[i] ^ mask[i % 4] for i in range(len(message_bytes)))
-        frame.extend(masked_payload)
-        
-        ws_connection.send(bytes(frame))
-        print(f"Sent: {message}")
-        return True
-        
-    except Exception as e:
-        print(f"Failed to send message: {e}")
-        return False
 
-# Main execution
-if __name__ == "__main__":
-    print("ESP32 Boot Script Starting...")
+def setup_remote_debugging(vario_state):
+    """Setup WiFi and WebSocket connection for remote debugging"""
+    print("Remote debugging enabled - connecting to WiFi and WebSocket...")
     
-    # Connect to Wi-Fi
-    connect_to_wifi("JellyfishSSID", "N0Fr33Wifi!")
+    # Create network manager
+    network_mgr = NetworkManager(
+        wifi_ssid=WIFI_SSID,
+        wifi_password=WIFI_PASSWORD,
+        websocket_host=WEBSOCKET_HOST,
+        websocket_port=WEBSOCKET_PORT
+    )
     
-    # Setup WebSocket connection after Wi-Fi is connected
-    if wifi_connected:
-        success = setup_websocket_connection("192.168.178.119", 5474)
+    # Attempt WebSocket connection
+    websocket_sock, wlan = network_mgr.setup_websocket()
+    
+    if websocket_sock:
+        # Configure VarioState for WebSocket logging
+        vario_state.websocket_sock = websocket_sock
+        vario_state.websocket_enabled = True
         
-        if success:
-            print("🎉 Boot script completed successfully!")
-            # You can add more debug messages here
-            time.sleep(2)
-            send_websocket_message("Boot sequence completed")
-        else:
-            print("❌ Failed to establish WebSocket connection")
+        # Send initial boot message
+        vario_state.log("ESP32 Vario system booted - WebSocket logging enabled")
+        vario_state.log(f"Network IP: {wlan.ifconfig()[0]}")
+        
+        return True, network_mgr
     else:
-        print("❌ Wi-Fi connection failed")
+        print("WebSocket connection failed - using console logging only")
+        vario_state.websocket_enabled = False
+        return False, None
+
+
+def setup_standalone_mode(vario_state):
+    """Setup vario for standalone operation (no networking)"""
+    print("Remote debugging disabled - running in standalone mode")
     
-    print("Main script is running...")
+    # Disable WebSocket logging
+    vario_state.websocket_enabled = False
+    vario_state.websocket_sock = None
+    
+    # Log to console that we're in standalone mode
+    vario_state.log("ESP32 Vario system booted - Standalone mode (no remote logging)")
+    
+    return True, None
+
+
+def main_boot_sequence():
+    """Main boot sequence orchestrator"""
+    
+    # =================================================================
+    # BOOT HEADER
+    # =================================================================
+    print(BOOT_MESSAGES['separator'])
+    if ENABLE_REMOTE_DEBUG:
+        print(BOOT_MESSAGES['remote_debug'])
+    else:
+        print(BOOT_MESSAGES['standalone'])
+    print(BOOT_MESSAGES['separator'])
+    
+    # =================================================================
+    # STEP 1: Initialize Core VarioState
+    # =================================================================
+    vario_state = initialize_vario_state()
+    global_state.vario_state = vario_state
+    
+    # =================================================================
+    # STEP 2: Setup Networking (Conditional)
+    # =================================================================
+    network_mgr = None
+    if ENABLE_REMOTE_DEBUG:
+        remote_debug_success, network_mgr = setup_remote_debugging(vario_state)
+    else:
+        remote_debug_success, network_mgr = setup_standalone_mode(vario_state)
+    
+    # =================================================================
+    # STEP 3: Initialize Hardware Components
+    # =================================================================
+    hardware_mgr = HardwareManager(vario_state, BUZZER_PIN)
+    hardware_success = hardware_mgr.initialize_all_hardware()
+    
+    # Store hardware info in global state for main.py access
+    sensor_info = hardware_mgr.get_sensor_info()
+    global_state.sensor_object = sensor_info['sensor_object']
+    global_state.audio_system = sensor_info['audio_system']
+    global_state.hardware_initialized = sensor_info['initialized']
+    
+    # =================================================================
+    # STEP 4: Final Boot Status
+    # =================================================================
+    if ENABLE_REMOTE_DEBUG:
+        if remote_debug_success:
+            print(STATUS_MESSAGES['remote_active'])
+        else:
+            print(STATUS_MESSAGES['remote_failed'])
+    else:
+        print(STATUS_MESSAGES['standalone'])
+    
+    # Final memory cleanup
+    gc.collect()
+    
+    return hardware_success and (remote_debug_success or not ENABLE_REMOTE_DEBUG)
+
+
+# =============================================================================
+# BOOT EXECUTION
+# =============================================================================
+if __name__ == "__main__":
+    # Execute main boot sequence
+    boot_success = main_boot_sequence()
+    
+    if boot_success:
+        print("🎉 Boot sequence completed successfully!")
+    else:
+        print("⚠️ Boot sequence completed with warnings - check logs above")
+        
+    print("Starting main application...")
+    
+    # Import and run main application
+    try:
+        import main
+    except ImportError as e:
+        print(f"Failed to import main application: {e}")
+    except Exception as e:
+        print(f"Error in main application: {e}")
+
+
+

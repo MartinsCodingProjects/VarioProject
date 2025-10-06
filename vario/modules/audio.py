@@ -1,120 +1,128 @@
 from time import sleep
 from machine import Pin, PWM
+from _thread import start_new_thread
 
-def init_buzzer(buzzer_pin = 4, vario_state=None):
-    """
-    Initialize the passive buzzer on GPIO 4
-    Must be called before using any audio functions
-    """
+class AudioSystem:
+    """Class-based audio system for ESP32 Vario buzzer management"""
     
-    try:
-        # Create PWM object on GPIO 4
-        pin = Pin(buzzer_pin, Pin.OUT)
-        pwm = PWM(pin)
-        pwm.freq(1000)  # Default frequency
-        pwm.duty(0) # Start with the buzzer off
-        vario_state.log(f"Buzzer initialized on GPIO {buzzer_pin}")
-        return pwm
-    except Exception as e:
-        vario_state.log(f"Buzzer initialization failed: {e}")
-        return None
-
-def play_tone(frequency, duration, buzzer_pwm, vario_state):
-    """
-    Play a tone at given frequency for given duration (in milliseconds)
-    frequency: Hz (0 = silence)
-    duration: milliseconds
-    """
+    def __init__(self, buzzer_pin=4):
+        """Initialize AudioSystem with specified buzzer pin"""
+        self.buzzer_pin = buzzer_pin
+        self.buzzer_pwm = None
+        self.is_initialized = False
+        self.beep_thread_running = False
+        
+    def initialize(self):
+        """Initialize the buzzer PWM system"""
+        try:
+            # Create PWM object on specified GPIO pin
+            pin = Pin(self.buzzer_pin, Pin.OUT)
+            self.buzzer_pwm = PWM(pin)
+            self.buzzer_pwm.freq(1000)  # Default frequency
+            self.buzzer_pwm.duty(0)     # Start with buzzer off
+            
+            self.is_initialized = True
+            return True
+            
+        except Exception as e:
+            self.is_initialized = False
+            raise RuntimeError(f"AudioSystem initialization failed: {e}")
     
-    if buzzer_pwm is None:
-        vario_state.log("Buzzer not initialized! Call init_buzzer() first.")
-        return
-    
-    if frequency > 0 and duration > 0:
-        # Set frequency and start tone (50% duty cycle for good volume)
-        buzzer_pwm.freq(int(frequency))
-        buzzer_pwm.duty(512)  # 50% duty cycle (0-1023 range)
-        sleep(duration / 1000.0)  # Convert ms to seconds
-        buzzer_pwm.duty(0)  # Stop tone
-        vario_state.log(f"Beeped: {frequency} Hz for {duration} ms")
-    else:
-        # Silence - ensure buzzer is off
-        buzzer_pwm.duty(0)
-        if duration > 0:
-            sleep(duration / 1000.0)
-
-def handle_beep(v_speed_lock, vario_state, positiv_threshold = 0.2, negativ_threshold=-1):
-    """
-    Makes one beep and a pause after the beep, if v_speed meets set criterias
-    Beep and pauses lenght and frequency depend on v_speed
-
-    There is a silent zone for low values of v_speed (each positiv and negativ values)
-    then there will be threshols, for when the positiv and negativ beeps start
-
-    positiv beeping if v_speed > positiv_threshold starts with longer beep and pause, with middle pitch values.
-    beeps get faster and pitch gets higher with increasing v_speed
-
-    negativ beeping, starting with v_speed < negativ_theshold, is no beeping but continues note (pause = 0), with low pitch values
-    if v_speed decrease pitch gets lower
-    """
-    last_v_speed = 0  # Cache the last known v_speed for fallback
-    
-    vario_state.log("Beep handler thread started")
-
-    while True:
-        # Check if the vario is turned on
-        if not vario_state.turned_on:
-            sleep(0.1)  # Sleep briefly to avoid busy waiting
-            continue
-        # Try to acquire the lock without blocking
-        if v_speed_lock.acquire():
-            try:
-                # Read the latest v_speed in a thread-safe manner
-                v_speed = vario_state.v_speed
-                last_v_speed = v_speed  # Update the cached value
-            finally:
-                # Always release the lock after accessing v_speed
-                v_speed_lock.release()
+    def play_tone(self, frequency, duration):
+        """Play a tone at given frequency for given duration (in milliseconds)"""
+        if not self.is_initialized:
+            raise RuntimeError("AudioSystem not initialized")
+        
+        if frequency > 0 and duration > 0:
+            # Set frequency and start tone (50% duty cycle for good volume)
+            self.buzzer_pwm.freq(int(frequency))
+            self.buzzer_pwm.duty(512)  # 50% duty cycle (0-1023 range)
+            sleep(duration / 1000.0)   # Convert ms to seconds
+            self.buzzer_pwm.duty(0)    # Stop tone
         else:
-            # If the lock is held by the main thread, use the last known v_speed
-            v_speed = last_v_speed
-
-        # Only play sounds if sound is enabled
-        if vario_state.sound_enabled:
-            vario_state.onboard_led.value(1)  # Turn on LED when sound is enabled
-            # Get tone parameters based on v_speed
-            tone, duration, pause = map_vspeed_to_tone(v_speed)
-
-            # Play the tone if within active thresholds
-            if v_speed > positiv_threshold or v_speed < negativ_threshold:
-                play_tone(tone, duration, vario_state.buzzer_pwm, vario_state)
-                if pause > 0:
-                    sleep(pause / 1000.0)  # Convert ms to seconds
+            # Silence - ensure buzzer is off
+            self.buzzer_pwm.duty(0)
+            if duration > 0:
+                sleep(duration / 1000.0)
+    
+    def stop_all_sounds(self):
+        """Immediately stop all audio output"""
+        if self.is_initialized and self.buzzer_pwm:
+            self.buzzer_pwm.duty(0)
+    
+    def start_beep_handler(self, vario_state, v_speed_lock, positive_threshold=0.2, negative_threshold=-1):
+        """Start the beep handler thread for continuous audio feedback"""
+        if not self.is_initialized:
+            raise RuntimeError("AudioSystem not initialized")
+        
+        if self.beep_thread_running:
+            return  # Already running
+        
+        self.beep_thread_running = True
+        start_new_thread(self._beep_handler_thread, 
+                        (vario_state, v_speed_lock, positive_threshold, negative_threshold))
+    
+    def _beep_handler_thread(self, vario_state, v_speed_lock, positive_threshold, negative_threshold):
+        """Internal beep handler thread function"""
+        last_v_speed = 0  # Cache for fallback
+        
+        vario_state.log("AudioSystem beep handler thread started")
+        
+        while True:
+            # Check if vario is turned on
+            if not vario_state.turned_on:
+                sleep(0.1)
+                continue
+            
+            # Thread-safe v_speed reading
+            if v_speed_lock.acquire():
+                try:
+                    v_speed = vario_state.v_speed
+                    last_v_speed = v_speed
+                finally:
+                    v_speed_lock.release()
+            else:
+                v_speed = last_v_speed  # Use cached value if lock is busy
+            
+            # Handle audio and LED feedback
+            if vario_state.sound_enabled:
+                vario_state.onboard_led.value(1)  # LED on when sound enabled
+                
+                # Get tone parameters and play if within thresholds
+                tone, duration, pause = self._map_vspeed_to_tone(v_speed)
+                
+                if v_speed > positive_threshold or v_speed < negative_threshold:
+                    self.play_tone(tone, duration)
+                    if pause > 0:
+                        sleep(pause / 1000.0)
+            else:
+                vario_state.onboard_led.value(0)  # LED off when sound disabled
+                sleep(0.1)  # Prevent busy waiting
+    
+    def _map_vspeed_to_tone(self, v_speed):
+        """Map vertical speed to audio parameters (frequency_hz, duration_ms, pause_ms)"""
+        if v_speed > 1.5:
+            return (1800, 100, 50)    # Fast beep, high pitch for strong lift
+        elif v_speed > 1.0:
+            return (1600, 120, 80)
+        elif v_speed > 0.5:
+            return (1400, 150, 150)
+        elif v_speed > 0.1:           # Weak lift
+            return (1200, 200, 300)
+        elif v_speed < -2.0:          # Strong sink - continuous low tone
+            return (300, 500, 0)      # No pause = continuous
+        elif v_speed < -1.0:
+            return (400, 400, 50)
+        elif v_speed < -0.5:
+            return (500, 300, 100)
         else:
-            vario_state.onboard_led.value(0)  # Turn off LED when sound is disabled
-            # If sound is disabled, just add a small delay to prevent busy waiting
-            sleep(0.1)
+            return (0, 0, 200)        # Silence in neutral zone
+    
+    def get_info(self):
+        """Get audio system information for debugging"""
+        return {
+            "status": "initialized" if self.is_initialized else "not_initialized",
+            "buzzer_pin": self.buzzer_pin,
+            "thread_running": self.beep_thread_running
+        }
 
-def map_vspeed_to_tone(v):
-    """
-    Map vertical speed to audio parameters
-    Returns: (frequency_hz, duration_ms, pause_ms)
-
-    Todo: Adjust these mappings based on desired audio feedback characteristics
-    """
-    if v > 1.5:
-        return (1800, 100, 50)  # fast beep, high pitch for strong lift
-    elif v > 1.0:
-        return (1600, 120, 80)
-    elif v > 0.5:
-        return (1400, 150, 150)
-    elif v > 0.1:  # weak lift
-        return (1200, 200, 300)
-    elif v < -2.0:  # strong sink - continuous low tone
-        return (300, 500, 0)   # no pause = continuous
-    elif v < -1.0:
-        return (400, 400, 50)
-    elif v < -0.5:
-        return (500, 300, 100)
-    else:
-        return (0, 0, 200)  # silence in neutral zone

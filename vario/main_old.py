@@ -1,48 +1,72 @@
 import time
 import gc
-from machine import Pin
 from _thread import start_new_thread, allocate_lock
 
 from modules.calc_v_speed import get_v_speed
-from modules.util import convert_to_altitude, setup_toggle_button
+from modules.util import convert_to_altitude
 from modules.frontend import display_v_speed, display_integrated_v_speed
-from modules.sensor import init_ms5611, ms5611_pressure_measurement
-from modules.audio import handle_beep, init_buzzer
-
-from modules.variostate import VarioState
+from modules.sensor import MS5611Sensor
+from modules.audio import handle_beep
+import modules.global_state as global_state
 
 # Import config variables
 from config import (
     MEASUREMENT_FREQUENCY,
-    MEASUREMENT_INTERVAL,
-    BASE_PRESSURE,
     MINIMAL_DELAY,
     INTEGRATION_INTERVAL,
     POSTIVE_BEEP_THRESHOLD,
     NEGATIVE_BEEP_THRESHOLD,    
-    BUZZER_PIN,
-    INTERVAL_MS
+    INTERVAL_MS,
+    BASE_PRESSURE
 )
 
-# Initialize global state variables
-vario_state = VarioState(BASE_PRESSURE, MEASUREMENT_FREQUENCY, INTEGRATION_INTERVAL)
+# Access the global vario_state initialized in boot.py
+vario_state = global_state.vario_state
 
-# Initialize hardware with calibration
-## Baro sensor
-spi, cs, calibration = init_ms5611(vario_state) # init and calibration of baro sensor
-c1, c2, c3, c4, c5, c6 = calibration
-vario_state.log("MS5611 sensor initialized with calibration")
-## Buzzer
-vario_state.buzzer_pwm = init_buzzer(BUZZER_PIN,vario_state)
-vario_state.log("Buzzer initialized and Audio ready!")
-# Setup sound toggle functionality
-boot_button, onboard_led = setup_toggle_button(vario_state)
+if vario_state is None:
+    # Fallback: create vario_state if not available from boot.py
+    from modules.variostate import VarioState
+    vario_state = VarioState(BASE_PRESSURE, MEASUREMENT_FREQUENCY, INTEGRATION_INTERVAL)
+    global_state.vario_state = vario_state
+    print("Warning: vario_state not found from boot.py, created new instance")
 
-# Store references in vario_state if needed
-vario_state.boot_button = boot_button
-vario_state.onboard_led = onboard_led
+# Check if hardware was successfully initialized in boot.py
+hardware_initialized = global_state.hardware_initialized
 
+# Initialize sensor variables and calibration coefficients
+sensor_object = None
+spi = None
+cs = None
+calibration = None
+c1 = c2 = c3 = c4 = c5 = c6 = None  # Calibration coefficients
 
+if hardware_initialized:
+    # Access hardware components initialized in boot.py
+    sensor_object = global_state.sensor_object  # New class-based sensor
+    spi = global_state.sensor_spi               # Legacy fallback
+    cs = global_state.sensor_cs                 # Legacy fallback
+    calibration = global_state.sensor_calibration  # Legacy fallback
+    
+    if sensor_object and sensor_object.is_initialized:
+        vario_state.log("Main application using modern MS5611Sensor class from boot.py")
+    elif calibration is not None:
+        try:
+            c1, c2, c3, c4, c5, c6 = calibration
+            vario_state.log("Main application using legacy sensor functions from boot.py")
+        except (ValueError, TypeError) as e:
+            vario_state.log(f"Error unpacking calibration data: {e}")
+            calibration = None
+    
+if not hardware_initialized or (not sensor_object and calibration is None):
+    vario_state.log("Warning: Sensor not properly initialized in boot.py, attempting fallback initialization")
+    try:
+        # Fallback hardware initialization
+        spi, cs, calibration = init_ms5611(vario_state)
+        c1, c2, c3, c4, c5, c6 = calibration
+        vario_state.log("Fallback sensor initialization completed")
+    except Exception as e:
+        vario_state.log(f"Critical error: Failed to initialize sensor in fallback mode: {e}")
+        raise SystemExit("Cannot proceed without sensor initialization")
 
 
 # Create lock
@@ -73,8 +97,8 @@ def mainloop_function():
         # Check if it's time for next measurement
         if time.ticks_diff(current_time, vario_state.last_measurement_time) >= INTERVAL_MS:
             try:
-                # Your vario logic here
-                measured_pressure = ms5611_pressure_measurement(spi, cs, c1, c2, c3, c4, c5, c6)
+                # Read pressure using the MS5611Sensor class
+                measured_pressure = sensor_object.read_pressure()
                 altitude = convert_to_altitude(measured_pressure, vario_state.estimated_local_pressure)
 
                 # add new measurements to logs and drop oldest entry
