@@ -1,5 +1,6 @@
 # boot.py - ESP32 Vario System Boot Sequence
-# Handles system initialization, networking, and hardware setup
+# Handles ALL initialization - networking, sensors, audio
+# main.py should only run if boot.py succeeds
 
 import time
 import gc
@@ -29,25 +30,35 @@ from config import (
 
 
 def initialize_vario_state():
-    """Initialize the core VarioState object with system parameters"""
-    print("Initializing VarioState...")
+    """
+    Step 1: Create the main vario state object
+    This holds all measurement data and system status
+    """
+    print("📊 STEP 1: Initializing VarioState...")
     
-    # Create VarioState with configured parameters
     vario_state = VarioState(
         base_pressure=BASE_PRESSURE,
         measurement_frequency=MEASUREMENT_FREQUENCY,
         integration_interval=INTEGRATION_INTERVAL
     )
     
-    print("VarioState initialized successfully")
+    print("✓ VarioState created successfully")
     return vario_state
 
 
-def setup_remote_debugging(vario_state):
-    """Setup WiFi and WebSocket connection for remote debugging"""
-    print("Remote debugging enabled - connecting to WiFi and WebSocket...")
+def setup_networking(vario_state):
+    """
+    Step 2: Setup WiFi and WebSocket (if remote debugging enabled)
+    Returns: (success, network_manager)
+    """
+    if not ENABLE_REMOTE_DEBUG:
+        print("📡 STEP 2: Remote debugging disabled - running standalone")
+        vario_state.websocket_enabled = False
+        vario_state.log("ESP32 Vario booted in standalone mode")
+        return True, None
     
-    # Create network manager
+    print("📡 STEP 2: Setting up remote debugging...")
+    
     network_mgr = NetworkManager(
         wifi_ssid=WIFI_SSID,
         wifi_password=WIFI_PASSWORD,
@@ -55,45 +66,79 @@ def setup_remote_debugging(vario_state):
         websocket_port=WEBSOCKET_PORT
     )
     
-    # Attempt WebSocket connection
     websocket_sock, wlan = network_mgr.setup_websocket()
     
     if websocket_sock:
-        # Configure VarioState for WebSocket logging
         vario_state.websocket_sock = websocket_sock
         vario_state.websocket_enabled = True
-        
-        # Send initial boot message
-        vario_state.log("ESP32 Vario system booted - WebSocket logging enabled")
+        vario_state.log("ESP32 Vario booted with remote debugging")
         vario_state.log(f"Network IP: {wlan.ifconfig()[0]}")
-        
+        print("✓ Remote debugging active")
         return True, network_mgr
     else:
-        print("WebSocket connection failed - using console logging only")
+        print("⚠️ Remote debugging failed - continuing standalone")
         vario_state.websocket_enabled = False
-        return False, None
+        return True, None  # Not fatal - we can run without it
 
 
-def setup_standalone_mode(vario_state):
-    """Setup vario for standalone operation (no networking)"""
-    print("Remote debugging disabled - running in standalone mode")
+def setup_hardware(vario_state):
+    """
+    Step 3: Initialize all hardware (sensors, audio)
+    This is CRITICAL - vario cannot run without working sensors
+    Returns: (success, hardware_info)
+    """
+    print("🔧 STEP 3: Initializing hardware...")
     
-    # Disable WebSocket logging
-    vario_state.websocket_enabled = False
-    vario_state.websocket_sock = None
+    # Create hardware manager
+    hardware_mgr = HardwareManager(vario_state, BUZZER_PIN)
     
-    # Log to console that we're in standalone mode
-    vario_state.log("ESP32 Vario system booted - Standalone mode (no remote logging)")
+    # Initialize all hardware
+    success = hardware_mgr.initialize_all_hardware()
+    hardware_info = hardware_mgr.get_sensor_info()
     
-    return True, None
+    # Check critical components
+    ms5611_ok = hardware_info['sensor_object'] and hardware_info['sensor_object'].is_initialized
+    bmi160_ok = hardware_info['bmi160_object'] and hardware_info['bmi160_object'].is_initialized
+    audio_ok = hardware_info['audio_system'] and hardware_info['audio_system'].is_initialized
+    
+    # Log hardware status
+    print(f"   MS5611 Barometer: {'✓ OK' if ms5611_ok else '✗ FAILED'}")
+    print(f"   BMI160 Motion:    {'✓ OK' if bmi160_ok else '⚠️ Optional'}")
+    print(f"   Audio System:     {'✓ OK' if audio_ok else '⚠️ Optional'}")
+    
+    if not ms5611_ok:
+        print("🚨 CRITICAL: MS5611 barometer is required for vario operation!")
+        return False, hardware_info
+    
+    print("✓ Hardware initialization complete")
+    return True, hardware_info
+
+
+def store_in_global_state(vario_state, hardware_info, network_mgr):
+    """
+    Step 4: Store all initialized objects in global state for main.py
+    This is how main.py gets access to all the hardware
+    """
+    print("💾 STEP 4: Storing objects in global state...")
+    
+    # Store core objects
+    global_state.vario_state = vario_state
+    global_state.ms5611_object = hardware_info['sensor_object']
+    global_state.bmi160_object = hardware_info['bmi160_object']
+    global_state.audio_system = hardware_info['audio_system']
+    global_state.hardware_initialized = hardware_info['initialized']
+    
+    print("✓ All objects stored in global state")
 
 
 def main_boot_sequence():
-    """Main boot sequence orchestrator"""
+    """
+    Complete boot sequence - handles everything needed to run the vario
     
-    # =================================================================
-    # BOOT HEADER
-    # =================================================================
+    If this function returns True, main.py can safely start
+    If this function returns False, system cannot operate
+    """
+    
     print(BOOT_MESSAGES['separator'])
     if ENABLE_REMOTE_DEBUG:
         print(BOOT_MESSAGES['remote_debug'])
@@ -101,71 +146,49 @@ def main_boot_sequence():
         print(BOOT_MESSAGES['standalone'])
     print(BOOT_MESSAGES['separator'])
     
-    # =================================================================
-    # STEP 1: Initialize Core VarioState
-    # =================================================================
-    vario_state = initialize_vario_state()
-    global_state.vario_state = vario_state
-    
-    # =================================================================
-    # STEP 2: Setup Networking (Conditional)
-    # =================================================================
-    network_mgr = None
-    if ENABLE_REMOTE_DEBUG:
-        remote_debug_success, network_mgr = setup_remote_debugging(vario_state)
-    else:
-        remote_debug_success, network_mgr = setup_standalone_mode(vario_state)
-    
-    # =================================================================
-    # STEP 3: Initialize Hardware Components
-    # =================================================================
-    hardware_mgr = HardwareManager(vario_state, BUZZER_PIN)
-    hardware_success = hardware_mgr.initialize_all_hardware()
-    
-    # Store hardware info in global state for main.py access
-    sensor_info = hardware_mgr.get_sensor_info()
-    global_state.sensor_object = sensor_info['sensor_object']
-    global_state.audio_system = sensor_info['audio_system']
-    global_state.hardware_initialized = sensor_info['initialized']
-    
-    # =================================================================
-    # STEP 4: Final Boot Status
-    # =================================================================
-    if ENABLE_REMOTE_DEBUG:
-        if remote_debug_success:
-            print(STATUS_MESSAGES['remote_active'])
-        else:
-            print(STATUS_MESSAGES['remote_failed'])
-    else:
-        print(STATUS_MESSAGES['standalone'])
-    
-    # Final memory cleanup
-    gc.collect()
-    
-    return hardware_success and (remote_debug_success or not ENABLE_REMOTE_DEBUG)
+    try:
+        # Step 1: Core system state
+        vario_state = initialize_vario_state()
+        
+        # Step 2: Networking (optional)
+        network_success, network_mgr = setup_networking(vario_state)
+        
+        # Step 3: Hardware (critical)
+        hardware_success, hardware_info = setup_hardware(vario_state)
+        
+        if not hardware_success:
+            print("🚨 BOOT FAILED: Critical hardware not available")
+            return False
+        
+        # Step 4: Make everything available to main.py
+        store_in_global_state(vario_state, hardware_info, network_mgr)
+        
+        # Final cleanup
+        gc.collect()
+        
+        print("🎉 BOOT SUCCESS: System ready for operation!")
+        return True
+        
+    except Exception as e:
+        print(f"🚨 BOOT FAILED: Unexpected error: {e}")
+        return False
 
 
 # =============================================================================
 # BOOT EXECUTION
 # =============================================================================
 if __name__ == "__main__":
-    # Execute main boot sequence
     boot_success = main_boot_sequence()
     
     if boot_success:
-        print("🎉 Boot sequence completed successfully!")
+        print("Starting main vario application...")
+        try:
+            import main
+        except Exception as e:
+            print(f"🚨 MAIN APPLICATION FAILED: {e}")
     else:
-        print("⚠️ Boot sequence completed with warnings - check logs above")
-        
-    print("Starting main application...")
-    
-    # Import and run main application
-    try:
-        import main
-    except ImportError as e:
-        print(f"Failed to import main application: {e}")
-    except Exception as e:
-        print(f"Error in main application: {e}")
+        print("🚨 CANNOT START: Boot sequence failed")
+        print("Check wiring and configuration, then reset ESP32")
 
 
 

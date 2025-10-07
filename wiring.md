@@ -6,27 +6,35 @@ GND → GND
 SCL → GPIO 22 (I2C Clock Line)
 SDA → GPIO 21 (I2C Data Line)
 CSB → 3V3 (for I2C mode)
+
 SDO → Leave unconnected (not needed in I2C mode)
 PS → Leave unconnected (not needed in I2C mode)
 
 ## BMI160 6-axis Gyro/Accelerometer (SPI)
-VIN → 3V3
-GND → GND
-SCX → GPIO 18 (SPI Clock Line)
-SDX → GPIO 23 (SPI Data Line - MOSI)
-SDO → GPIO 19 (SPI Data Out - MISO)
-CS → GPIO 5 (Chip Select)
-SAO → Leave unconnected (not needed in SPI mode)
-INT1 → Optional, GPIO 25 (for motion detection or data-ready interrupts)
-INT2 → Optional, GPIO 26 (for additional interrupt functionality)
-OCS, SDA, SCL → Leave unconnected (not needed in SPI mode)
+**Must Connect:**
+VIN → 3V3 (power input)
+GND → GND (ground)
+SCX → GPIO 18 (SPI Clock)
+SDX → GPIO 23 (SPI MOSI - data to sensor)
+CS → GPIO 5 (SPI Chip Select)
+
+**Optional:**
+INT1 → GPIO 25 (interrupt pin 1)
+INT2 → GPIO 26 (interrupt pin 2)
+
+**Leave Unconnected:**
+3V3 → (not needed when using VIN)
+SCL → (I2C only, not used in SPI mode)
+SDA → (I2C only, not used in SPI mode)
+SAO → (address select, not needed in SPI mode)
+OCS → (not needed in SPI mode)
 
 ## Passive Buzzer (PWM Audio Feedback)
 Buzzer + → GPIO 4 (PWM capable)
 Buzzer - → GND
 
 ### Pin Usage Summary:
-- GPIO 18, 19, 23, 5: SPI for BMI160 (cannot be shared)
+- GPIO 18, 23, 5: SPI for BMI160 (cannot be shared)
 - GPIO 21, 22: I2C for MS5611 (shared I2C bus)
 - GPIO 4: PWM for buzzer (dedicated)
 - GPIO 25, 26: Optional interrupt pins for BMI160
@@ -59,4 +67,4 @@ If you don't need these features, you can leave the INT1 and INT2 pins unconnect
 - **Interrupts (BMI160)**: Default GPIO 25 (INT1), GPIO 26 (INT2), alternatives: any free GPIO pins
 
 ### Pin Sharing NOT Possible:
-SPI pins (18, 19, 23, 5) cannot be shared with other devices as they use specific timing and protocols. The buzzer needs its own dedicated PWM pin.
+SPI pins (18, 23, 5) cannot be shared with other devices as they use specific timing and protocols. The buzzer needs its own dedicated PWM pin.

@@ -1,7 +1,7 @@
 # hardware_manager.py - Hardware initialization and management
 
 import gc
-from modules.sensor import MS5611Sensor
+from modules.sensor import MS5611Sensor, BMI160Sensor
 from modules.audio import AudioSystem
 from modules.util import setup_toggle_button
 
@@ -15,6 +15,7 @@ class HardwareManager:
         
         # Hardware component references
         self.ms5611_sensor = None
+        self.bmi160_sensor = None
         self.audio_system = None
     
     def initialize_sensor(self):
@@ -40,6 +41,34 @@ class HardwareManager:
                 
         except Exception as e:
             self.vario_state.log(f"Failed to initialize MS5611 sensor: {e}")
+            return False
+    
+    def initialize_bmi160_sensor(self):
+        """Initialize BMI160 gyro/accelerometer sensor"""
+        try:
+            self.vario_state.log("Initializing BMI160 gyro/accelerometer sensor (SPI mode)...")
+            
+            # Create and initialize BMI160 sensor object with SPI configuration
+            self.bmi160_sensor = BMI160Sensor(sck_pin=18, mosi_pin=23, cs_pin=5, int1_pin=25, int2_pin=26)
+            self.bmi160_sensor.initialize()
+            
+            # Get sensor info for logging
+            sensor_info = self.bmi160_sensor.get_info()
+            pins = sensor_info['pins']
+            interrupts = sensor_info['interrupts']
+            config = sensor_info['config']
+            chip_id = sensor_info['chip_id']
+            
+            self.vario_state.log(f"BMI160 sensor initialized successfully!")
+            self.vario_state.log(f"SPI Configuration: SCK=GPIO{pins['sck']}, MOSI=GPIO{pins['mosi']}, CS=GPIO{pins['cs']}")
+            self.vario_state.log(f"Interrupts: INT1=GPIO{interrupts['int1']}, INT2=GPIO{interrupts['int2']}")
+            self.vario_state.log(f"Config: {config['accel_range']}, {config['gyro_range']}, {config['sample_rate']}")
+            self.vario_state.log(f"Chip ID: {chip_id}")
+            
+            return True
+                
+        except Exception as e:
+            self.vario_state.log(f"Failed to initialize BMI160 sensor: {e}")
             return False
     
     def initialize_buzzer(self):
@@ -83,14 +112,17 @@ class HardwareManager:
         
         # Initialize components in order of importance
         sensor_ok = self.initialize_sensor()
+        bmi160_ok = self.initialize_bmi160_sensor()
         buzzer_ok = self.initialize_buzzer()
         ui_ok = self.initialize_user_interface()
         
         # Determine overall hardware status
-        self.hardware_initialized = sensor_ok  # Sensor is critical
+        self.hardware_initialized = sensor_ok  # MS5611 sensor is critical
         
         if self.hardware_initialized:
             self.vario_state.log("=== Hardware Initialization COMPLETED ===")
+            if not bmi160_ok:
+                self.vario_state.log("Warning: BMI160 motion sensor not available")
             if not buzzer_ok:
                 self.vario_state.log("Warning: Audio system not available")
             if not ui_ok:
@@ -108,6 +140,7 @@ class HardwareManager:
         """Get sensor initialization info for sharing with main application"""
         return {
             'sensor_object': self.ms5611_sensor,
+            'bmi160_object': self.bmi160_sensor,
             'audio_system': self.audio_system,
             'initialized': self.hardware_initialized
         }

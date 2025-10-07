@@ -35,15 +35,23 @@ It features high-frequency barometric altitude measurement, fast 6-axis motion s
 - SDO, PS → Leave unconnected
 
 ### BMI160 (Gyro/Accel, SPI)
-- VIN/3V3 → 3V3
-- GND → GND
-- SCX/SCK → GPIO 18 (SPI Clock)
-- SDX/MOSI → GPIO 23 (SPI MOSI)
-- SDO/MISO → GPIO 19 (SPI MISO)
+**Must Connect:**
+- VIN → 3V3 (power input)
+- GND → GND (ground)
+- SCX → GPIO 18 (SPI Clock)
+- SDX → GPIO 23 (SPI MOSI)
 - CS → GPIO 5 (SPI Chip Select)
-- INT1/INT2 → (Optional) GPIO 25/26 for interrupts
-- SAO → Leave unconnected (not needed in SPI mode)
-- OCS → Leave unconnected
+
+**Optional:**
+- INT1 → GPIO 25 (interrupt pin 1)
+- INT2 → GPIO 26 (interrupt pin 2)
+
+**Leave Unconnected:**
+- 3V3 → (not needed when using VIN)
+- SCL → (I2C only, not used in SPI mode)
+- SDA → (I2C only, not used in SPI mode)
+- SAO → (address select, not needed in SPI mode)
+- OCS → (not needed in SPI mode)
 
 ### Passive Buzzer
 - + → GPIO 4 (PWM capable)
