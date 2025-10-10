@@ -23,8 +23,8 @@ class HardwareManager:
         try:
             self.vario_state.log("Initializing MS5611 barometric sensor (I2C mode)...")
             
-            # Create and initialize MS5611 sensor object with I2C configuration
-            self.ms5611_sensor = MS5611Sensor(scl_pin=22, sda_pin=21, i2c_address=0x77)
+            # Create and initialize MS5611 sensor object with I2C configuration (address 0x76)
+            self.ms5611_sensor = MS5611Sensor(scl_pin=22, sda_pin=21, i2c_address=0x76)
             self.ms5611_sensor.initialize()
             
             # Get sensor info for logging
@@ -46,10 +46,10 @@ class HardwareManager:
     def initialize_bmi160_sensor(self):
         """Initialize BMI160 gyro/accelerometer sensor"""
         try:
-            self.vario_state.log("Initializing BMI160 gyro/accelerometer sensor (SPI mode)...")
+            self.vario_state.log("Initializing BMI160 gyro/accelerometer sensor (I2C mode)...")
             
-            # Create and initialize BMI160 sensor object with SPI configuration
-            self.bmi160_sensor = BMI160Sensor(sck_pin=18, mosi_pin=23, cs_pin=5, int1_pin=25, int2_pin=26)
+            # Create and initialize BMI160 sensor object with I2C configuration (shared bus with MS5611)
+            self.bmi160_sensor = BMI160Sensor(scl_pin=22, sda_pin=21, i2c_address=0x68, int1_pin=25, int2_pin=26)
             self.bmi160_sensor.initialize()
             
             # Get sensor info for logging
@@ -58,9 +58,10 @@ class HardwareManager:
             interrupts = sensor_info['interrupts']
             config = sensor_info['config']
             chip_id = sensor_info['chip_id']
+            i2c_addr = sensor_info['i2c_address']
             
             self.vario_state.log(f"BMI160 sensor initialized successfully!")
-            self.vario_state.log(f"SPI Configuration: SCK=GPIO{pins['sck']}, MOSI=GPIO{pins['mosi']}, CS=GPIO{pins['cs']}")
+            self.vario_state.log(f"I2C Configuration: SCL=GPIO{pins['scl']}, SDA=GPIO{pins['sda']}, Address={i2c_addr}")
             self.vario_state.log(f"Interrupts: INT1=GPIO{interrupts['int1']}, INT2=GPIO{interrupts['int2']}")
             self.vario_state.log(f"Config: {config['accel_range']}, {config['gyro_range']}, {config['sample_rate']}")
             self.vario_state.log(f"Chip ID: {chip_id}")

@@ -3,7 +3,7 @@ import machine, time
 class MS5611Sensor:
     """MS5611 Barometric Pressure Sensor Driver (I2C Mode)"""
     
-    def __init__(self, scl_pin=22, sda_pin=21, i2c_address=0x77):
+    def __init__(self, scl_pin=22, sda_pin=21, i2c_address=0x76):
         """Initialize MS5611 sensor with configurable I2C pins and address"""
         self.scl_pin = scl_pin
         self.sda_pin = sda_pin
@@ -34,8 +34,8 @@ class MS5611Sensor:
     
     def _read_prom(self, addr):
         """Read calibration data from sensor's PROM memory"""
-        self.i2c.writeto(self.i2c_address, bytearray([addr]))  # Send PROM read address
-        data = self.i2c.readfrom(self.i2c_address, 2)          # Read 2 bytes of calibration data
+        # Use readfrom_mem for compatibility with test script
+        data = self.i2c.readfrom_mem(self.i2c_address, addr, 2)
         return int.from_bytes(data, 'big')  # Convert bytes to integer
     
     def _read_calibration(self):
@@ -87,22 +87,18 @@ class MS5611Sensor:
         c1, c2, c3, c4, c5, c6 = self.calibration
         
         # Start pressure conversion with OSR=1024 (fast, good precision)
-        self.i2c.writeto(self.i2c_address, bytearray([0x46]))  # Pressure conversion command
-        time.sleep_ms(4)  # Wait for conversion (3.3ms + margin)
+        self.i2c.writeto(self.i2c_address, bytearray([0x48]))  # Pressure conversion command (matches test script)
+        time.sleep_ms(10)  # Wait for conversion (10ms as in test script)
         
         # Read pressure ADC value
-        self.i2c.writeto(self.i2c_address, bytearray([0x00]))  # ADC read command
-        data = self.i2c.readfrom(self.i2c_address, 3)          # Read 3 bytes (24-bit result)
-        d1 = int.from_bytes(data, 'big')  # Raw pressure
+        d1 = int.from_bytes(self.i2c.readfrom_mem(self.i2c_address, 0x00, 3), 'big')  # Use readfrom_mem
         
         # Start temperature conversion
-        self.i2c.writeto(self.i2c_address, bytearray([0x56]))  # Temperature conversion command
-        time.sleep_ms(4)  # Wait for conversion
+        self.i2c.writeto(self.i2c_address, bytearray([0x58]))  # Temperature conversion command (matches test script)
+        time.sleep_ms(10)  # Wait for conversion
         
         # Read temperature ADC value
-        self.i2c.writeto(self.i2c_address, bytearray([0x00]))  # ADC read command
-        data = self.i2c.readfrom(self.i2c_address, 3)          # Read 3 bytes
-        d2 = int.from_bytes(data, 'big')  # Raw temperature
+        d2 = int.from_bytes(self.i2c.readfrom_mem(self.i2c_address, 0x00, 3), 'big')  # Use readfrom_mem
         
         # Calculate calibrated pressure using MS5611 formulas
         dT = d2 - c5 * 256
@@ -135,19 +131,18 @@ class MS5611Sensor:
 
 
 class BMI160Sensor:
-    """BMI160 6-axis Gyro/Accelerometer Sensor Driver (SPI Mode)"""
+    """BMI160 6-axis Gyro/Accelerometer Sensor Driver (I2C Mode)"""
     
-    def __init__(self, sck_pin=18, mosi_pin=23, cs_pin=5, int1_pin=None, int2_pin=None):
-        """Initialize BMI160 sensor with configurable SPI pins"""
-        self.sck_pin = sck_pin
-        self.mosi_pin = mosi_pin
-        self.cs_pin = cs_pin
+    def __init__(self, scl_pin=22, sda_pin=21, i2c_address=0x68, int1_pin=None, int2_pin=None):
+        """Initialize BMI160 sensor with configurable I2C pins and address"""
+        self.scl_pin = scl_pin
+        self.sda_pin = sda_pin
+        self.i2c_address = i2c_address
         self.int1_pin = int1_pin
         self.int2_pin = int2_pin
         
         # Hardware references
-        self.spi = None
-        self.cs = None
+        self.i2c = None
         self.is_initialized = False
         
         # BMI160 register addresses
@@ -166,19 +161,18 @@ class BMI160Sensor:
         # Expected chip ID
         self.CHIP_ID_VALUE = 0xD1
     
-    def _init_spi(self):
-        """Initialize SPI communication with BMI160 sensor"""
-        # Configure SPI bus
-        self.spi = machine.SPI(1,
-                              baudrate=1000000,  # 1MHz SPI frequency
-                              polarity=0,
-                              phase=0,
-                              sck=machine.Pin(self.sck_pin),
-                              mosi=machine.Pin(self.mosi_pin))
+    def _init_i2c(self):
+        """Initialize I2C communication with BMI160 sensor"""
+        # Configure I2C bus with specific settings for BMI160
+        self.i2c = machine.I2C(0,
+                              scl=machine.Pin(self.scl_pin),
+                              sda=machine.Pin(self.sda_pin),
+                              freq=400000)  # 400kHz I2C frequency
         
-        # Configure chip select pin
-        self.cs = machine.Pin(self.cs_pin, machine.Pin.OUT)
-        self.cs.value(1)  # CS high (inactive)
+        # Check if sensor is present
+        devices = self.i2c.scan()
+        if self.i2c_address not in devices:
+            raise RuntimeError(f"BMI160 not found at I2C address 0x{self.i2c_address:02X}")
         
         # Configure interrupt pins if provided
         if self.int1_pin:
@@ -188,25 +182,17 @@ class BMI160Sensor:
     
     def _read_register(self, reg_addr):
         """Read a single register from BMI160"""
-        self.cs.value(0)  # CS low (active)
-        self.spi.write(bytearray([reg_addr | 0x80]))  # Read command (MSB = 1)
-        data = self.spi.read(1)
-        self.cs.value(1)  # CS high (inactive)
+        data = self.i2c.readfrom_mem(self.i2c_address, reg_addr, 1)
         return data[0]
     
     def _write_register(self, reg_addr, value):
         """Write a single register to BMI160"""
-        self.cs.value(0)  # CS low (active)
-        self.spi.write(bytearray([reg_addr & 0x7F, value]))  # Write command (MSB = 0)
-        self.cs.value(1)  # CS high (inactive)
+        self.i2c.writeto_mem(self.i2c_address, reg_addr, bytearray([value]))
         time.sleep_ms(1)  # Small delay after write
     
     def _read_multiple_registers(self, reg_addr, num_bytes):
         """Read multiple registers from BMI160"""
-        self.cs.value(0)  # CS low (active)
-        self.spi.write(bytearray([reg_addr | 0x80]))  # Read command
-        data = self.spi.read(num_bytes)
-        self.cs.value(1)  # CS high (inactive)
+        data = self.i2c.readfrom_mem(self.i2c_address, reg_addr, num_bytes)
         return data
     
     def _soft_reset(self):
@@ -240,8 +226,8 @@ class BMI160Sensor:
     def initialize(self):
         """Initialize the BMI160 sensor completely"""
         try:
-            # Initialize SPI communication
-            self._init_spi()
+            # Initialize I2C communication
+            self._init_i2c()
             
             # Soft reset sensor
             self._soft_reset()
@@ -311,10 +297,10 @@ class BMI160Sensor:
             "status": "initialized",
             "chip_id": f"0x{chip_id:02X}",
             "pins": {
-                "sck": self.sck_pin,
-                "mosi": self.mosi_pin, 
-                "cs": self.cs_pin
+                "scl": self.scl_pin,
+                "sda": self.sda_pin
             },
+            "i2c_address": f"0x{self.i2c_address:02X}",
             "interrupts": {
                 "int1": self.int1_pin,
                 "int2": self.int2_pin
